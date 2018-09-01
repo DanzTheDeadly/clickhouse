@@ -61,10 +61,7 @@ class connection ():
         query = f"alter table {table} delete where event='{event}'"
         url = self.connector_str + f'&query={query}'
         requests.post(url=url)
-    
-    def replace (self, data, table, event):
-        self.delete(table=table, event=event)
-        self.insert(data=data, table=table)
+
 
 def select (query, output='table', file='data.csv'):
     return cluster.select(query=query, output=output, file=file)
@@ -79,7 +76,7 @@ def delete (table, event):
     else:
         cluster.delete(table=table, event=event)
 
-def update (data, table, event):
+def replace (data, table, event):
     if nodes:
         for node in nodes:
             node.delete(table=table+'_node', event=event)
