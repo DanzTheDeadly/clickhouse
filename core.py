@@ -35,10 +35,10 @@ class connection ():
 
     def insert (self, data, table, event):
         if type(data) == p.core.frame.DataFrame:
+            data.columns = ['json']
             data['insert_time'] = d.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             data['event'] = event
             data = data.set_index('insert_time')
-            data.columns = ['json']
             ph.to_clickhouse(data, table=table, connection=self.connector)
         
         elif type(data) == list:
