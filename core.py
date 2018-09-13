@@ -22,7 +22,7 @@ class connection ():
             )
             self.connector_str = connector
 
-    def select (self, query, output='table', file='data.csv'):
+    def select (self, query, output='dict', file='data.csv'):
         data = ph.read_clickhouse(query, connection=self.connector)
         if output == 'table':
             pass
@@ -62,13 +62,36 @@ class connection ():
         url = self.connector_str + f'&query={query}'
         requests.post(url=url)
 
+    def raw (self, query):
+        if type(query) == str:
+            url = self.connector_str + f'&query={query}'
+            r = requests.post(url=url)
 
-def select (query, output='table', file='data.csv'):
+    def clear (self, table):
+        query = f'alter table {table} delete where 1'
+        url = self.connector_str + f'&query={query}'
+        r = requests.post(url=url)
+
+def log (f):
+    def wrap (*pargs, **kargs):
+        pargs_names = f.__code__.co_varnames[:f.__code__.co_argcount]
+        args_dict = {**dict(zip(pargs_names, pargs)), **kargs}
+        if 'data' in args_dict.keys():
+            args_dict['rows_inserted'] = len(args_dict['data'])
+            del args_dict['data']
+        cluster.insert([args_dict], table=f'{cluster.connector['database']}_logs', event=f.__name__)
+        return f(*pargs, **kargs)
+    return wrap
+
+
+def select (query, output='dict', file='data.csv'):
     return cluster.select(query=query, output=output, file=file)
 
+@log
 def insert (data, table, event):
     cluster.insert(data=data, table=table, event=event)
 
+@log
 def delete (table, event):
     if nodes:
         for node in nodes:
@@ -76,6 +99,7 @@ def delete (table, event):
     else:
         cluster.delete(table=table, event=event)
 
+@log
 def replace (data, table, event):
     if nodes:
         for node in nodes:
@@ -84,6 +108,34 @@ def replace (data, table, event):
         cluster.delete(table=table, event=event)
     cluster.insert(data=data, table=table)
 
+@log
+def clear (table):
+
+
+@log
+def create (table):
+	if '.' in table:
+		table=table.split('.')[1]
+	if nodes:
+		cluster_info = select('select cluster, shard_num, host_name from system.clusters')
+		cluster_name = cluster_info[0]['cluster']
+		for node in nodes:
+			host = cluster_info[nodes.index(node)]['host_name']
+			shard = cluster_info[nodes.index(node)]['shard_num']
+			query = f"CREATE TABLE IF NOT EXISTS {self.connector['database']}.{table}_node on cluster {cluster_name} (insert_time DateTime, event String, json String) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{self.connector['database']}.{table}', '{host}', insert_time, insert_time, 8192)"
+			cluster.raw(query)
+		query_distr = f"CREATE TABLE IF NOT EXISTS {self.connector['database']}.{table} on cluster {cluster_name} (insert_time DateTime, event String, json String) ENGINE = Distributed('{cluster_name}', '{self.connector['database']}', '{table}_node', rand())"
+		cluster.raw(query_distr)
+	else:
+		query = f"CREATE TABLE IF NOT EXISTS {self.connector['database']}.{table} (insert_time DateTime, event String, json String) ENGINE = MergeTree()"
+		cluster.raw(query)
+@log
+def clear (table):
+	if nodes:
+		for node in nodes:
+			node.clear(table=table+'_node')
+	else:
+		cluster.clear(table=table)
 
 cluster = connection(config.cluster_connector)
 nodes = [connection(node) for node in config.nodes_connectors]
